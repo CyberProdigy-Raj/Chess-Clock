@@ -6,15 +6,11 @@ Clock-Raj provides a simple interface for playing timed chess games with preset 
 
 ## 📸 Screenshots
 
-Add screenshots of the project here.
-
 ### Setup Screen
 
 ![Clock-Raj Setup Screen](screenshots/setup-screen.png)
 
 ### Chess Clock
-
-Then add it below:
 
 ![Clock-Raj Chess Clock](screenshots/chess-clock.png)
 
