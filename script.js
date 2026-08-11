@@ -159,6 +159,7 @@
   const clockScreen = document.getElementById('clockScreen');
   document.getElementById('startBtn').addEventListener('click', ()=>{
     if(!selectedConfig) return;
+    ensureAudio();
     initClock(selectedConfig);
     setupScreen.style.display = 'none';
     clockScreen.classList.add('active');
@@ -180,28 +181,79 @@
   const playIcon = document.getElementById('playIcon');
   const btnReset = document.getElementById('btnReset');
   const btnMenu = document.getElementById('btnMenu');
+  const btnSound = document.getElementById('btnSound');
+  const soundOnIcon = document.getElementById('soundOnIcon');
+  const soundOffIcon = document.getElementById('soundOffIcon');
+
+  /* ---------------- SOUND ---------------- */
+  let audioCtx = null;
+  let muted = false;
+
+  function ensureAudio(){
+    if(!audioCtx){
+      try{ audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+      catch(e){ audioCtx = null; }
+    }
+    if(audioCtx && audioCtx.state === 'suspended'){ audioCtx.resume(); }
+  }
+
+  function playTone(freq, duration, type, volume, delay){
+    if(muted || !audioCtx) return;
+    delay = delay || 0;
+    const t0 = audioCtx.currentTime + delay;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t0);
+    gain.gain.setValueAtTime(volume, t0);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(t0);
+    osc.stop(t0 + duration + 0.02);
+  }
+
+  // sharp mechanical click, like pressing a physical clock plunger
+  function playClick(){ playTone(680, 0.07, 'square', 0.16); }
+  // soft tap for menu/pause/reset UI buttons
+  function playUIClick(){ playTone(500, 0.05, 'sine', 0.1); }
+  // single warning tick, used each second in the final countdown
+  function playTickWarn(){ playTone(1050, 0.05, 'sine', 0.13); }
+  // descending three-note alarm when a player's flag falls
+  function playFlagAlarm(){
+    playTone(880, 0.18, 'sawtooth', 0.2, 0);
+    playTone(660, 0.18, 'sawtooth', 0.2, 0.2);
+    playTone(440, 0.32, 'sawtooth', 0.2, 0.4);
+  }
+
+  btnSound.addEventListener('click', (e)=>{
+    e.stopPropagation();
+    ensureAudio();
+    muted = !muted;
+    soundOnIcon.style.display = muted ? 'none' : 'block';
+    soundOffIcon.style.display = muted ? 'block' : 'none';
+    if(!muted) playUIClick();
+  });
 
   let players; // [{ms, inc, el, incEl, flagEl, half}]
   let active = null;   // 0 = white, 1 = black
   let running = false;
   let started = false;
   let flagged = false;
-  let lastTick = null;
-  let rafId = null;
+  let lastTimestamp = null;
+  const TICK_MS = 100; // update display 10x/sec, but always measured against real Date.now()
 
   function initClock(cfg){
     players = [
-      { ms: cfg.wMs, inc: cfg.wInc*1000, el: timeWhiteEl, incEl: incWhiteEl, flagEl: flagWhiteEl, half: halfWhite },
-      { ms: cfg.bMs, inc: cfg.bInc*1000, el: timeBlackEl, incEl: incBlackEl, flagEl: flagBlackEl, half: halfBlack }
+      { ms: cfg.wMs, inc: cfg.wInc*1000, el: timeWhiteEl, incEl: incWhiteEl, flagEl: flagWhiteEl, half: halfWhite, lastAnnouncedSecond: null },
+      { ms: cfg.bMs, inc: cfg.bInc*1000, el: timeBlackEl, incEl: incBlackEl, flagEl: flagBlackEl, half: halfBlack, lastAnnouncedSecond: null }
     ];
     active = null;
     running = false;
     started = false;
     flagged = false;
-    lastTick = null;
-    // NOTE: the requestAnimationFrame loop below is started once and kept alive
-    // forever via tick() rescheduling itself — never cancel it here, or the
-    // countdown dies permanently on the first Start/Reset.
+    lastTimestamp = null;
+    // NOTE: the setInterval loop below is started once at page load and kept
+    // alive forever — never stop it here, it just no-ops while not running.
 
     players.forEach((p,i)=>{
       p.half.classList.remove('is-active','is-flagged','is-disabled');
@@ -236,11 +288,12 @@
     playIcon.style.display = isRunning ? 'none' : 'block';
   }
 
-  function tick(now){
+  function tick(){
+    const now = Date.now();
     if(running && !flagged && active!==null){
-      if(lastTick===null) lastTick = now;
-      const delta = now - lastTick;
-      lastTick = now;
+      if(lastTimestamp===null) lastTimestamp = now;
+      const delta = now - lastTimestamp;
+      lastTimestamp = now;
       const p = players[active];
       p.ms -= delta;
       if(p.ms <= 0){
@@ -249,20 +302,26 @@
         onFlag(active);
       } else {
         renderTime(p);
+        // tick sound once per second during the final countdown
+        const secLeft = Math.ceil(p.ms/1000);
+        if(secLeft <= 10 && secLeft >= 1 && secLeft !== p.lastAnnouncedSecond){
+          p.lastAnnouncedSecond = secLeft;
+          playTickWarn();
+        }
       }
     } else {
-      lastTick = null;
+      lastTimestamp = null;
     }
-    // Loop runs forever, regardless of running/flagged state, so the clock
-    // can always resume — only the branch above decides whether time moves.
-    rafId = requestAnimationFrame(tick);
   }
-  rafId = requestAnimationFrame(tick);
+  // Real wall-clock timer: Date.now() diffs mean 1 displayed second always
+  // equals 1 real second, regardless of frame rate or tab throttling.
+  setInterval(tick, TICK_MS);
 
   function onFlag(idx){
     flagged = true;
     running = false;
     setPauseIcon(false);
+    playFlagAlarm();
     players[idx].half.classList.add('is-flagged');
     players[idx].flagEl.style.display = 'block';
     players.forEach(p=>p.half.classList.add('is-disabled'));
@@ -272,17 +331,19 @@
 
   function pressHalf(idx){
     if(flagged) return;
+    ensureAudio();
     if(!started){
       // First press: the presser just finished their move -> opponent's clock starts.
       started = true;
       running = true;
       active = 1 - idx;
-      lastTick = null;
+      lastTimestamp = null;
       players[idx].half.classList.remove('is-active');
       players[active].half.classList.add('is-active');
       centerLabel.textContent = 'PLAYING';
       readyHint.style.display = 'none';
       setPauseIcon(true);
+      playClick();
       return;
     }
     if(!running) return; // paused, ignore taps
@@ -294,7 +355,9 @@
     players[idx].half.classList.remove('is-active');
     active = 1 - idx;
     players[active].half.classList.add('is-active');
-    lastTick = null;
+    players[active].lastAnnouncedSecond = null;
+    lastTimestamp = null;
+    playClick();
   }
 
   halfWhite.addEventListener('click', ()=>pressHalf(0));
@@ -302,20 +365,26 @@
 
   btnPause.addEventListener('click', (e)=>{
     e.stopPropagation();
+    ensureAudio();
     if(!started || flagged) return;
     running = !running;
-    lastTick = null;
+    lastTimestamp = null;
     setPauseIcon(running);
     centerLabel.textContent = running ? 'PLAYING' : 'PAUSED';
+    playUIClick();
   });
 
   btnReset.addEventListener('click', (e)=>{
     e.stopPropagation();
+    ensureAudio();
+    playUIClick();
     if(selectedConfig) initClock(selectedConfig);
   });
 
   btnMenu.addEventListener('click', (e)=>{
     e.stopPropagation();
+    ensureAudio();
+    playUIClick();
     running = false;
     clockScreen.classList.remove('active');
     setupScreen.style.display = 'flex';
