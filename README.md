@@ -4,6 +4,17 @@ A clean, responsive chess clock built with **HTML, CSS, and vanilla JavaScript**
 
 Clock-Raj provides a simple interface for playing timed chess games with preset time controls or fully customizable clocks for White and Black.
 
+---
+
+## 🌐 Live Demo
+
+🔗 **Try the application here:**
+
+**https://chess-clock-pied.vercel.app/**
+
+> Experience the app directly in your browser—no installation required.
+
+---
 ## 📸 Screenshots
 
 ### Setup Screen
@@ -111,12 +122,6 @@ Clock-Raj/
 ```
 
 The current application is contained in a **single HTML file**, including its HTML structure, CSS, and JavaScript.
-
-## 🚀 Running the Project
-
-No build tools or installation are required.
-
-link: 
 
 ## 🧠 JavaScript Logic
 
